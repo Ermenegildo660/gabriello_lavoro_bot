@@ -4,7 +4,7 @@ from telegram.ext import Updater, CommandHandler
 TOKEN = os.getenv("BOT_TOKEN")
 
 def start(update, context):
-    update.message.reply_text("Ciao! Il bot è attivo 😊")
+    update.message.reply_text("Bot attivo!")
 
 def main():
     updater = Updater(TOKEN, use_context=True)
