@@ -5,8 +5,10 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 DATA_FILE = "dati.json"
-AUTHORIZED_USER_ID = 361555418  # <-- QUI METTI IL TUO ID !!!
+AUTHORIZED_USER_ID = 361555418  # <-- IL TUO ID TELEGRAM
 
+
+# ------------------ LETTURA / SALVATAGGIO DATI ------------------ #
 def load_data():
     if not os.path.exists(DATA_FILE):
         return {}
@@ -17,6 +19,8 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
+
+# ------------------ TASTIERA ------------------ #
 def get_keyboard():
     return ReplyKeyboardMarkup([
         ["Entrata", "Uscita"],
@@ -24,13 +28,20 @@ def get_keyboard():
         ["Esporta Excel", "Reset mese"]
     ], resize_keyboard=True)
 
+
+# ------------------ /START ------------------ #
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != AUTHORIZED_USER_ID:
         await update.message.reply_text("❌ Non sei autorizzato ad usare questo bot.")
         return
 
-    await update.message.reply_text("Ciao! Il bot è attivo 😊", reply_markup=get_keyboard())
+    await update.message.reply_text(
+        "Ciao! Il bot è attivo 😊",
+        reply_markup=get_keyboard()
+    )
 
+
+# ------------------ GESTIONE MESSAGGI ------------------ #
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != AUTHORIZED_USER_ID:
         return
@@ -66,7 +77,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Inizio lavoro registrato 🟦\n{now_str}")
         return
 
-    # --- FINE LAVORO + CALCOLO ORE ---
+    # --- FINE LAVORO ---
     if text == "Fine lavoro":
         start_time_str = data[user]["work_start"]
 
@@ -78,7 +89,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         diff = now - start_time
         ore = round(diff.total_seconds() / 3600, 2)
 
-        # Salvo il record
+        # Salvo il record completo
         data[user]["records"].append({
             "azione": "Sessione lavoro",
             "inizio": start_time_str,
@@ -89,7 +100,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data[user]["work_start"] = None
         save_data(data)
 
-        await update.message.reply_text(f"Fine lavoro 🟪\nOre lavorate: **{ore}h**")
+        await update.message.reply_text(
+            f"Fine lavoro 🟪\nOre lavorate: **{ore}h**"
+        )
         return
 
     # --- RESET MESE ---
@@ -130,15 +143,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-async def main():
+
+# ------------------ MAIN (CORRETTO PER RAILWAY) ------------------ #
+def main():
     TOKEN = os.getenv("BOT_TOKEN")
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    await app.run_polling()
+    app.run_polling()
+
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    main()
