@@ -195,6 +195,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return await update.message.reply_text("✔ Lavoro registrato.", reply_markup=menu_principale())
 
+# --- TORNA INDIETRO DAL MENU DEI LAVORI FISSI ---
+if text == "Indietro":
+    await update.message.reply_text(
+        "Scegli cosa vuoi fare Baby 💚",
+        reply_markup=ReplyKeyboardMarkup(
+            [
+                ["Entrata", "Uscita"],
+                ["Inizio lavoro", "Fine lavoro"],
+                ["Lavori del giorno", "Lavori fissi"],
+                ["Esporta Excel", "Reset mese"]
+            ],
+            resize_keyboard=True
+        )
+    )
+    return
+    
     # -----------------------------------
     # LAVORI FISSI
     # -----------------------------------
