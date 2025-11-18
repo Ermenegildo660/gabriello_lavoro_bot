@@ -49,9 +49,9 @@ LAVORI_FISSI = [
     "Pulizia totale cella negativa pasticceria"
 ]
 
-# ----------------------------------------------------
+# --------------------------
 # FUNZIONI UTILI
-# ----------------------------------------------------
+# --------------------------
 
 def load_data():
     if not os.path.exists(DATA_FILE):
@@ -63,9 +63,9 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# ----------------------------------------------------
+# --------------------------
 # TASTIERE
-# ----------------------------------------------------
+# --------------------------
 
 def menu_principale():
     return ReplyKeyboardMarkup([
@@ -95,18 +95,18 @@ def menu_lavori_fissi():
     righe.append(["Indietro"])
     return ReplyKeyboardMarkup(righe, resize_keyboard=True)
 
-# ----------------------------------------------------
+# --------------------------
 # START
-# ----------------------------------------------------
+# --------------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != AUTHORIZED_USER_ID:
         return await update.message.reply_text("❌ Bot privato.")
-    await update.message.reply_text("Ciao Baby 💚 — bot lavoro attivo.", reply_markup=menu_principale())
+    return await update.message.reply_text("Ciao Baby 💚 — bot lavoro attivo.", reply_markup=menu_principale())
 
-# ----------------------------------------------------
+# --------------------------
 # HANDLER PRINCIPALE
-# ----------------------------------------------------
+# --------------------------
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != AUTHORIZED_USER_ID:
@@ -116,40 +116,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
     user = str(AUTHORIZED_USER_ID)
 
-    # Se non esiste, creo struttura
     if user not in data:
         data[user] = {"records": [], "work_start": None}
 
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    # -----------------------------------
+    # --------------------------
     # ENTRATA
-    # -----------------------------------
+    # --------------------------
     if text == "Entrata":
         data[user]["records"].append({"azione": "Entrata", "orario": now_str})
         save_data(data)
         return await update.message.reply_text(f"Entrata registrata 🟢\n{now_str}")
 
-    # -----------------------------------
+    # --------------------------
     # USCITA
-    # -----------------------------------
+    # --------------------------
     if text == "Uscita":
         data[user]["records"].append({"azione": "Uscita", "orario": now_str})
         save_data(data)
         return await update.message.reply_text(f"Uscita registrata 🔴\n{now_str}")
 
-    # -----------------------------------
+    # --------------------------
     # INIZIO LAVORO
-    # -----------------------------------
+    # --------------------------
     if text == "Inizio lavoro":
         data[user]["work_start"] = now_str
         save_data(data)
         return await update.message.reply_text(f"Inizio lavoro registrato 🟦\n{now_str}")
 
-    # -----------------------------------
+    # --------------------------
     # FINE LAVORO
-    # -----------------------------------
+    # --------------------------
     if text == "Fine lavoro":
         start_time = data[user]["work_start"]
         if not start_time:
@@ -165,26 +164,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "fine": now_str,
             "ore": ore
         })
-
         data[user]["work_start"] = None
         save_data(data)
 
         return await update.message.reply_text(f"Fine lavoro 🟪\nOre lavorate: **{ore}h**")
 
-    # -----------------------------------
+    # --------------------------
     # LAVORI DEL GIORNO
-    # -----------------------------------
+    # --------------------------
     if text == "Lavori del giorno":
         context.user_data["adding_work"] = True
         return await update.message.reply_text("Scrivi il lavoro che hai fatto:", reply_markup=menu_lavori())
 
-    # -----------------------------------
-    # SALVATAGGIO LAVORO EXTRA
-    # -----------------------------------
     if context.user_data.get("adding_work"):
         if text == "Indietro":
             context.user_data["adding_work"] = False
-            return await update.message.reply_text("Torno al menu.", reply_markup=menu_principale())
+            return await update.message.reply_text("Ok Baby 💚", reply_markup=menu_principale())
+
+        if text == "Scrivi lavoro extra":
+            return await update.message.reply_text("Scrivi il lavoro:")
 
         data[user]["records"].append({
             "azione": "Lavoro extra",
@@ -193,27 +191,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
         save_data(data)
 
+        context.user_data["adding_work"] = False
         return await update.message.reply_text("✔ Lavoro registrato.", reply_markup=menu_principale())
 
-# --- TORNA INDIETRO DAL MENU DEI LAVORI FISSI ---
-if text == "Indietro":
-    await update.message.reply_text(
-        "Scegli cosa vuoi fare Baby 💚",
-        reply_markup=ReplyKeyboardMarkup(
-            [
-                ["Entrata", "Uscita"],
-                ["Inizio lavoro", "Fine lavoro"],
-                ["Lavori del giorno", "Lavori fissi"],
-                ["Esporta Excel", "Reset mese"]
-            ],
-            resize_keyboard=True
-        )
-    )
-    return
-    
-    # -----------------------------------
+    # --------------------------
     # LAVORI FISSI
-    # -----------------------------------
+    # --------------------------
     if text == "Lavori fissi":
         return await update.message.reply_text("Seleziona un lavoro:", reply_markup=menu_lavori_fissi())
 
@@ -226,18 +209,22 @@ if text == "Indietro":
         save_data(data)
         return await update.message.reply_text("✔ Lavoro fisso registrato.", reply_markup=menu_principale())
 
-    # -----------------------------------
+    # INDietro SOLO DA LAVORI FISSI
+    if text == "Indietro":
+        return await update.message.reply_text("Ok Baby 💚", reply_markup=menu_principale())
+
+    # --------------------------
     # RESET
-    # -----------------------------------
+    # --------------------------
     if text == "Reset mese":
         data[user]["records"] = []
         data[user]["work_start"] = None
         save_data(data)
         return await update.message.reply_text("🔄 Dati del mese resettati.")
 
-    # -----------------------------------
-    # ESPORTA EXCEL
-    # -----------------------------------
+    # --------------------------
+    # EXPORT EXCEL
+    # --------------------------
     if text == "Esporta Excel":
         try:
             from openpyxl import Workbook
@@ -271,9 +258,10 @@ if text == "Indietro":
 
         return
 
-# ----------------------------------------------------
+# --------------------------
 # MAIN
-# ----------------------------------------------------
+# --------------------------
+
 def main():
     app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
 
