@@ -366,47 +366,43 @@ async def handle_fine_lavoro(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 # ---------------- EXPORT EXCEL ----------------
-async def export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # allow only owner
-    if update.effective_user.id != OWNER_ID:
-        return
 
-    data = load_data()
-    # Build a simple CSV-like Excel using openpyxl
+if text == "Esporta Excel":
     try:
         from openpyxl import Workbook
-    except Exception:
-        await update.message.reply_text("Errore: manca openpyxl nelle dipendenze.")
-        return
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Registro Lavori"
-    ws.append(["Data", "Entrata", "Uscita", "Ore lavorate", "Inizio sessione", "Fine sessione", "Ore sessione", "Lavori fissi", "Lavori extra"])
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Registro lavori"
 
-    # sort keys
-    for day in sorted(data.keys()):
-        rec = data[day]
-        lavori_fissi = "; ".join(rec.get("lavori_fissi", []))
-        lavori_extra = "; ".join(rec.get("lavori_extra", []))
-        ws.append([
-            rec.get("data", day),
-            rec.get("entrata", ""),
-            rec.get("uscita", ""),
-            rec.get("ore_lavorate", ""),
-            rec.get("inizio_lavoro", ""),
-            rec.get("fine_lavoro", ""),
-            rec.get("ore_sessione", ""),
-            lavori_fissi,
-            lavori_extra
-        ])
+        # intestazioni
+        ws.append(["Azione", "Inizio", "Fine", "Orario", "Ore", "Lavoro"])
 
-    filename = "registro_lavori.xlsx"
-    wb.save(filename)
+        # scrittura righe
+        for r in data[user]["records"]:
+            ws.append([
+                r.get("azione", ""),
+                r.get("inizio", ""),
+                r.get("fine", ""),
+                r.get("orario", ""),
+                r.get("ore", ""),
+                r.get("lavoro", "")
+            ])
 
-    # send file
-    await update.message.reply_document(document=InputFile(filename))
-    await update.message.reply_text("✅ Esportazione completata.", reply_markup=main_keyboard())
+        # nome file Excel vero
+        filename = "registro_lavoro.xlsx"
+        wb.save(filename)
+
+        # invio file
+        await update.message.reply_document(
+            open(filename, "rb"),
+            caption="📄 Esportazione completata"
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"Errore durante esportazione: {str(e)}")
+
+    return
 
 
 # ---------------- RESET MESE ----------------
