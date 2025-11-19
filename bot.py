@@ -102,7 +102,7 @@ def menu_lavori_fissi():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != AUTHORIZED_USER_ID:
         return await update.message.reply_text("❌ Bot privato.")
-    return await update.message.reply_text("Ciao Baby 💚 — bot lavoro attivo.", reply_markup=menu_principale())
+    return await update.message.reply_text("Ciao — bot lavoro attivo.", reply_markup=menu_principale())
 
 # --------------------------
 # HANDLER PRINCIPALE
@@ -179,7 +179,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("adding_work"):
         if text == "Indietro":
             context.user_data["adding_work"] = False
-            return await update.message.reply_text("Ok Baby 💚", reply_markup=menu_principale())
+            return await update.message.reply_text("Okay", reply_markup=menu_principale())
 
         if text == "Scrivi lavoro extra":
             return await update.message.reply_text("Scrivi il lavoro:")
