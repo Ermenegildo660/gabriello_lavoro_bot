@@ -381,7 +381,7 @@ def main():
     # Job giornaliero: esportazione automatica a fine giornata
     jq = app.job_queue
     # 22:00 UTC ≈ 23:00 italiane (Railway usa UTC)
-    jq.run_daily(export_excel_fine_giornata, time=dtime(22, 0))
+    jq.run_daily(export_excel_fine_giornata, time=dtime(21, 0))
 
     app.run_polling()
 
