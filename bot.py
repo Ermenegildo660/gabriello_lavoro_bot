@@ -228,7 +228,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data(data)
         return await update.message.reply_text("Dati del mese resettati.")
 
-    # ESPORTA EXCEL
+    # ESPORTA EXCEL (manuale)
     if text == "Esporta Excel":
         await genera_e_invia_excel(update, data, user)
         return
@@ -298,11 +298,14 @@ async def genera_e_invia_excel(update_or_context, data=None, user_id_str=None, a
         )
 
 # --------------------------
-# JOB AUTOMATICO
+# PROMEMORIA GIORNALIERO (solo messaggio)
 # --------------------------
 
-async def export_excel_fine_giornata(context: ContextTypes.DEFAULT_TYPE):
-    await genera_e_invia_excel(context, auto=True)
+async def reminder_salvataggio_excel(context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(
+        chat_id=AUTHORIZED_USER_ID,
+        text="Promemoria: ricordati di premere 'Esporta Excel' nel bot per salvare il registro di oggi."
+    )
 
 # --------------------------
 # MAIN
@@ -314,8 +317,9 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    # JobQueue: solo promemoria, niente più salvataggio automatico del file
     jq = app.job_queue
-    jq.run_daily(export_excel_fine_giornata, time=dtime(21, 0))  # 22:00 ITA
+    jq.run_daily(reminder_salvataggio_excel, time=dtime(21, 0))  # 22:00 italiane circa
 
     app.run_polling()
 
