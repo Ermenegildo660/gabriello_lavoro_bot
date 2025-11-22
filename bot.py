@@ -214,6 +214,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def genera_excel(update: Update):
     from openpyxl import Workbook
+    from telegram import InputFile
+    import os
+
     print("=== ESPORTAZIONE AVVIATA ===")
 
     data = load_data()
@@ -254,10 +257,11 @@ async def genera_excel(update: Update):
         return await update.message.reply_text(f"Errore durante l'esportazione: {e}")
 
     try:
-        await update.message.reply_document(
-            InputFile(file_path),
-            caption="Esportazione completata"
-        )
+        with open(file_path, "rb") as f:
+            await update.message.reply_document(
+                document=InputFile(f, filename="registro_lavoro.xlsx"),
+                caption="Esportazione completata"
+            )
         print("FILE INVIATO A TELEGRAM")
     except Exception as e:
         print("ERRORE INVIO TELEGRAM:", e)
