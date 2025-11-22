@@ -214,12 +214,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def genera_excel(update: Update):
     from openpyxl import Workbook
+    print("=== ESPORTAZIONE AVVIATA ===")
 
     data = load_data()
     user = str(AUTHORIZED_USER_ID)
     records = data.get(user, {}).get("records", [])
 
+    print(f"Record trovati: {len(records)}")
+
     if not records:
+        print("NESSUN DATO DA ESPORTARE")
         return await update.message.reply_text("Nessun dato da esportare.")
 
     wb = Workbook()
@@ -238,14 +242,26 @@ async def genera_excel(update: Update):
             r.get("lavoro", "")
         ])
 
-    # CARTELLA SEMPRE SCRIVIBILE SU RAILWAY
-    file_path = "/var/tmp/registro_lavoro.xlsx"
-    wb.save(file_path)
+    print("Scrittura righe completata.")
 
-    await update.message.reply_document(
-        InputFile(file_path),
-        caption="Esportazione completata"
-    )
+    file_path = "/var/tmp/registro_lavoro.xlsx"
+
+    try:
+        wb.save(file_path)
+        print(f"FILE SALVATO IN: {file_path}")
+    except Exception as e:
+        print("ERRORE DURANTE IL SALVATAGGIO:", e)
+        return await update.message.reply_text(f"Errore durante l'esportazione: {e}")
+
+    try:
+        await update.message.reply_document(
+            InputFile(file_path),
+            caption="Esportazione completata"
+        )
+        print("FILE INVIATO A TELEGRAM")
+    except Exception as e:
+        print("ERRORE INVIO TELEGRAM:", e)
+        await update.message.reply_text(f"Errore durante l'invio: {e}")
 
 # ------------------------------------------------------------
 # PROMEMORIA GIORNALIERO
