@@ -1,255 +1,333 @@
 import json
 import os
-from datetime import datetime, timedelta
-from math import radians, sin, cos, sqrt, atan2
-
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputFile
+from datetime import datetime, time as dtime
+from telegram import Update, ReplyKeyboardMarkup, InputFile
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters
+    ApplicationBuilder, CommandHandler,
+    MessageHandler, ContextTypes, filters
 )
 
 DATA_FILE = "dati.json"
-AUTHORIZED_USER_ID = 361555418  # il tuo ID TELEGRAM
+AUTHORIZED_USER_ID = 361555418  # tuo ID
 
-# Coordinate della tua posizione di lavoro
-LAVORO_LAT = 45.663178
-LAVORO_LON = 8.783582
-MAX_DISTANZA_METRI = 150  # distanza tollerata
-
-# -------------------------------
-# UTILITÀ
-# -------------------------------
-
-def distanza_da_lavoro(lat, lon):
-    R = 6371000
-    dlat = radians(lat - LAVORO_LAT)
-    dlon = radians(lon - LAVORO_LON)
-    a = (sin(dlat / 2) ** 2 +
-         cos(radians(LAVORO_LAT)) * cos(radians(lat)) *
-         sin(dlon / 2) ** 2)
-    c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    return R * c
-
-def carica_dati():
-    if not os.path.exists(DATA_FILE):
-        return []
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
-
-def salva_dati(dati):
-    with open(DATA_FILE, "w") as f:
-        json.dump(dati, f, indent=4)
-
-# -------------------------------
-# START
-# -------------------------------
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != AUTHORIZED_USER_ID:
-        return await update.message.reply_text("Accesso negato.")
-
-    keyboard = [
-        ["Entrata", "Uscita"],
-        ["Inizio lavoro", "Fine lavoro"],
-        ["Lavori fissi", "Lavori del giorno"],
-        ["Esporta Excel", "Backup dati"],
-        ["Reset mese"]
-    ]
-
-    await update.message.reply_text(
-        "Bot lavoro attivo.",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
-
-# -------------------------------
-# POSIZIONE
-# -------------------------------
-
-async def salva_posizione(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    posizione = update.message.location
-    context.user_data["posizione"] = posizione
-    await update.message.reply_text("📍 Posizione aggiornata!")
-
-# -------------------------------
-# ENTRATA CON POSIZIONE OPZIONALE
-# -------------------------------
-
-async def handle_entrata(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    posizione = context.user_data.get("posizione")
-
-    if posizione is None:
-        await update.message.reply_text("⚠️ Nessuna posizione ricevuta. Entrata registrata comunque.")
-    else:
-        distanza = distanza_da_lavoro(posizione.latitude, posizione.longitude)
-        if distanza > MAX_DISTANZA_METRI:
-            await update.message.reply_text(
-                f"⚠️ Sei fuori dalla zona lavoro ({int(distanza)} m). Entrata registrata comunque."
-            )
-        else:
-            await update.message.reply_text("📍 Posizione valida. Entrata registrata.")
-
-    entrata = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    context.user_data["entrata"] = entrata
-
-    await update.message.reply_text(f"Entrata registrata: {entrata}")
-
-    # INIZIO LAVORO AUTOMATICO DOPO 10 MINUTI
-    context.job_queue.run_once(inizio_lavoro_automatico, 600, chat_id=update.effective_chat.id)
-
-async def inizio_lavoro_automatico(context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(
-        chat_id=context.job.chat_id,
-        text="⏱️ Sono passati 10 minuti. Inizio lavoro registrato automaticamente."
-    )
-    context.user_data["inizio"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-# -------------------------------
-# USCITA CON POSIZIONE OPZIONALE
-# -------------------------------
-
-async def handle_uscita(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    posizione = context.user_data.get("posizione")
-
-    if posizione is None:
-        await update.message.reply_text("⚠️ Nessuna posizione ricevuta. Uscita registrata comunque.")
-    else:
-        distanza = distanza_da_lavoro(posizione.latitude, posizione.longitude)
-        if distanza > MAX_DISTANZA_METRI:
-            await update.message.reply_text(
-                f"⚠️ Sei fuori dalla zona lavoro ({int(distanza)} m). Uscita registrata comunque."
-            )
-        else:
-            await update.message.reply_text("📍 Posizione valida. Uscita registrata.")
-
-    uscita = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    context.user_data["uscita"] = uscita
-
-    await update.message.reply_text(f"Uscita registrata: {uscita}")
-
-# -------------------------------
-# INIZIO / FINE LAVORO
-# -------------------------------
-
-async def handle_inizio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    context.user_data["inizio"] = ora
-    await update.message.reply_text(f"Inizio lavoro registrato: {ora}")
-
-async def handle_fine(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "inizio" not in context.user_data:
-        return await update.message.reply_text("Prima premi 'Inizio lavoro'.")
-
-    inizio = datetime.strptime(context.user_data["inizio"], "%Y-%m-%d %H:%M:%S")
-    fine = datetime.now()
-    ore = round((fine - inizio).total_seconds() / 3600, 2)
-
-    context.user_data["fine"] = fine.strftime("%Y-%m-%d %H:%M:%S")
-
-    await update.message.reply_text(f"Fine lavoro. Ore lavorate: {ore}")
-
-    dati = carica_dati()
-    dati.append({
-        "data": inizio.date().isoformat(),
-        "inizio": context.user_data["inizio"],
-        "fine": context.user_data["fine"],
-        "ore": ore
-    })
-    salva_dati(dati)
-
-# -------------------------------
+# --------------------------
 # LAVORI FISSI
-# -------------------------------
-
+# --------------------------
 LAVORI_FISSI = [
     "Lavaggio settimanale scalette pasticceria",
     "Lavaggio settimanale rampa panificio",
-    "Pulizia settimanale forni rotor Polin/Bongard",
-    "Soffiatura bruciatori platea",
-    "Pulizia tappeto semi automatico",
-    "Pulizia linee taglio e imbustaggio",
-    "Pulizia linea tappeti panetteria",
+    "Pulizia settimanale forni rotor Polin/Bongard precotto/cotto/pizzeria",
+    "Soffiatura bruciatori platea/Werner",
+    "Pulizia tappeto semi automatico pane forni platea",
+    "Pulizia linee taglio pane e imbustaggio",
+    "Pulizia settimanale linea tappetti panetteria",
     "Pulizia filtri sala farina silos",
+    "Lavaggio corridoio e aspirapolvere dietro forni",
+    "Pulizia volumetrica spezzatrice pizza",
+    "Pulizia volumetrica spezzatrice pagnotte",
+    "Controllo numeri pozzetti acqua/vvf",
+    "Pulizia robot scarica carrelli zona cotto",
+    "Pulizia mensile linea taglio pane acqua Beor",
+    "Lavaggio lavastoviglie Velox",
+    "Pulizia mensile pesa linea ingredienti",
+    "Pulizia mensile frontale forno platea 10",
+    "Pulizia mensile frontale forno platea 11",
+    "Pulizia sopra forni rotor/Polin zona cotto",
+    "Pulizia mensile 4 frontali forni rotor",
+    "Pulizia sopra forni rotor/Polin zona precotto",
+    "Pulizia lavastoviglie tunnel resi",
+    "Pulizia mensile forni rotor precotto",
+    "Pulizia teglie farina su carrello",
+    "Manutenzione addolcitori (sale/cillit)",
+    "Lavaggio carrelli e teglie legno",
+    "Pulizia mensile frontali rotor 1/2/3",
+    "Pulizia rotor Polin cotto (1 pezzo)",
+    "Pulizia rotor Polin cotto (2 pezzi)",
+    "Pulizia rotor Polin farcitura pizze (2 pezzi)",
+    "Pulizia linea impacchettamento pizza",
+    "Lavaggio bandelle cella negativa pasticceria",
+    "Pulizia totale cella negativa pasticceria"
 ]
 
-async def handle_lavori_fissi(update: Update, context):
-    keyboard = [[lavoro] for lavoro in LAVORI_FISSI]
-    await update.message.reply_text(
-        "Seleziona un lavoro:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+# --------------------------
+# LETTURA / SALVATAGGIO DATI
+# --------------------------
+
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        return {}
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_data(data):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+# --------------------------
+# TASTIERE
+# --------------------------
+
+def menu_principale():
+    return ReplyKeyboardMarkup([
+        ["Entrata", "Uscita"],
+        ["Inizio lavoro", "Fine lavoro"],
+        ["Lavori del giorno", "Lavori fissi"],
+        ["Esporta Excel", "Backup dati"],
+        ["Reset mese"]
+    ], resize_keyboard=True)
+
+def menu_lavori():
+    return ReplyKeyboardMarkup(
+        [["Scrivi lavoro extra"], ["Indietro"]],
+        resize_keyboard=True
     )
 
-async def registra_lavoro(update: Update, context):
-    lavoro = update.message.text
-    ora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def menu_lavori_fissi():
+    righe = [[l] for l in LAVORI_FISSI]
+    righe.append(["Indietro"])
+    return ReplyKeyboardMarkup(righe, resize_keyboard=True)
 
-    dati = carica_dati()
-    dati.append({
-        "data": datetime.now().date().isoformat(),
-        "lavoro": lavoro,
-        "orario": ora
-    })
-    salva_dati(dati)
+# --------------------------
+# START
+# --------------------------
 
-    await update.message.reply_text("Lavoro registrato.")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != AUTHORIZED_USER_ID:
+        return await update.message.reply_text("Accesso non autorizzato.")
+    await update.message.reply_text(
+        "Bot lavoro attivo.",
+        reply_markup=menu_principale()
+    )
 
-# -------------------------------
-# ESPORTA EXCEL
-# -------------------------------
+# --------------------------
+# INIZIO LAVORO AUTOMATICO
+# --------------------------
 
-from openpyxl import Workbook
+async def auto_inizio_lavoro(context: ContextTypes.DEFAULT_TYPE):
+    data = load_data()
+    user = str(AUTHORIZED_USER_ID)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-async def esporta_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    dati = carica_dati()
+    if user not in data:
+        data[user] = {"records": [], "work_start": None}
+
+    data[user]["work_start"] = now
+    save_data(data)
+
+    await context.bot.send_message(
+        chat_id=AUTHORIZED_USER_ID,
+        text=f"Inizio lavoro automatico registrato.\n{now}"
+    )
+
+# --------------------------
+# HANDLER PRINCIPALE
+# --------------------------
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != AUTHORIZED_USER_ID:
+        return
+
+    text = update.message.text
+    data = load_data()
+    user = str(AUTHORIZED_USER_ID)
+
+    if user not in data:
+        data[user] = {"records": [], "work_start": None}
+
+    now = datetime.now()
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    adding_extra = context.user_data.get("adding_extra_work", False)
+
+    # --- INDIETRO ---
+    if text == "Indietro":
+        context.user_data["adding_extra_work"] = False
+        return await update.message.reply_text(
+            "Menu principale",
+            reply_markup=menu_principale()
+        )
+
+    # --- ENTRATA ---
+    if text == "Entrata":
+        data[user]["records"].append({"azione": "Entrata", "orario": now_str})
+        save_data(data)
+
+        # timer 10 minuti per auto inizio lavoro
+        context.job_queue.run_once(auto_inizio_lavoro, when=600)
+
+        return await update.message.reply_text(
+            f"Entrata registrata\n{now_str}\n\n"
+            "Tra 10 minuti partirà automaticamente l'inizio lavoro."
+        )
+
+    # --- USCITA ---
+    if text == "Uscita":
+        data[user]["records"].append({"azione": "Uscita", "orario": now_str})
+        save_data(data)
+        return await update.message.reply_text(f"Uscita registrata\n{now_str}")
+
+    # --- INIZIO LAVORO MANUALE ---
+    if text == "Inizio lavoro":
+        data[user]["work_start"] = now_str
+        save_data(data)
+        return await update.message.reply_text(f"Inizio lavoro registrato\n{now_str}")
+
+    # --- FINE LAVORO ---
+    if text == "Fine lavoro":
+        start_time_str = data[user]["work_start"]
+        if not start_time_str:
+            return await update.message.reply_text("Prima premi 'Inizio lavoro'.")
+        start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+        diff = now - start_dt
+        ore = round(diff.total_seconds() / 3600, 2)
+
+        data[user]["records"].append({
+            "azione": "Sessione lavoro",
+            "inizio": start_time_str,
+            "fine": now_str,
+            "ore": ore
+        })
+        data[user]["work_start"] = None
+        save_data(data)
+        return await update.message.reply_text(f"Fine lavoro\nOre lavorate: {ore} h")
+
+    # --- LAVORI DEL GIORNO ---
+    if text == "Lavori del giorno":
+        context.user_data["adding_extra_work"] = True
+        return await update.message.reply_text(
+            "Scrivi il lavoro (o premi Indietro):",
+            reply_markup=menu_lavori()
+        )
+
+    # --- INSERIMENTO LAVORO EXTRA ---
+    if adding_extra:
+        if text == "Scrivi lavoro extra":
+            return await update.message.reply_text(
+                "Scrivi il testo del lavoro:",
+                reply_markup=menu_lavori()
+            )
+        data[user]["records"].append({
+            "azione": "Lavoro extra",
+            "lavoro": text,
+            "orario": now_str
+        })
+        save_data(data)
+        context.user_data["adding_extra_work"] = False
+        return await update.message.reply_text(
+            "Lavoro registrato.",
+            reply_markup=menu_principale()
+        )
+
+    # --- LAVORI FISSI ---
+    if text == "Lavori fissi":
+        return await update.message.reply_text(
+            "Seleziona un lavoro:",
+            reply_markup=menu_lavori_fissi()
+        )
+
+    if text in LAVORI_FISSI:
+        data[user]["records"].append({
+            "azione": "Lavoro fisso",
+            "lavoro": text,
+            "orario": now_str
+        })
+        save_data(data)
+        return await update.message.reply_text(
+            "Lavoro registrato.",
+            reply_markup=menu_principale()
+        )
+
+    # --- RESET MESE ---
+    if text == "Reset mese":
+        data[user]["records"] = []
+        data[user]["work_start"] = None
+        save_data(data)
+        return await update.message.reply_text("Dati del mese resettati.")
+
+    # --- ESPORTA EXCEL ---
+    if text == "Esporta Excel":
+        await genera_e_invia_excel(update, data, user)
+        return
+
+    # --- BACKUP DATI ---
+    if text == "Backup dati":
+        await update.message.reply_document(
+            InputFile(DATA_FILE),
+            caption="Backup dei dati"
+        )
+        return
+
+    # --- FALLBACK ---
+    await update.message.reply_text(
+        "Comando non riconosciuto.",
+        reply_markup=menu_principale()
+    )
+
+# --------------------------
+# GENERA EXCEL + INVIO
+# --------------------------
+
+async def genera_e_invia_excel(update: Update, data=None, user_id_str=None):
+    from openpyxl import Workbook
+    from telegram import InputFile
+
+    if data is None or user_id_str is None:
+        data = load_data()
+        user_id_str = str(AUTHORIZED_USER_ID)
+
+    if user_id_str not in data or not data[user_id_str].get("records"):
+        return await update.message.reply_text("Nessun dato da esportare.")
+
+    records = data[user_id_str]["records"]
 
     wb = Workbook()
-    sh = wb.active
-    sh.append(["Data", "Inizio", "Fine", "Ore", "Lavoro", "Orario"])
+    ws = wb.active
+    ws.title = "Registro lavori"
 
-    for r in dati:
-        sh.append([
-            r.get("data", ""),
+    ws.append(["Azione", "Inizio", "Fine", "Orario", "Ore", "Lavoro"])
+
+    for r in records:
+        ws.append([
+            r.get("azione", ""),
             r.get("inizio", ""),
             r.get("fine", ""),
+            r.get("orario", ""),
             r.get("ore", ""),
-            r.get("lavoro", ""),
-            r.get("orario", "")
+            r.get("lavoro", "")
         ])
 
-    file_path = "/tmp/registro_lavoro.xlsx"
+    file_path = "/var/tmp/registro_lavoro.xlsx"
     wb.save(file_path)
 
-    await update.message.reply_document(InputFile(file_path))
+    with open(file_path, "rb") as f:
+        await update.message.reply_document(
+            document=InputFile(f, filename="registro_lavoro.xlsx"),
+            caption="Esportazione completata"
+        )
 
-# -------------------------------
-# RESET MESE
-# -------------------------------
+# --------------------------
+# PROMEMORIA SERALE
+# --------------------------
 
-async def reset_mese(update: Update, context):
-    salva_dati([])
-    await update.message.reply_text("Registro del mese azzerato.")
+async def reminder(context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(
+        chat_id=AUTHORIZED_USER_ID,
+        text="Promemoria: ricordati di premere 'Esporta Excel' nel bot per salvare il registro di oggi."
+    )
 
-# -------------------------------
+# --------------------------
 # MAIN
-# -------------------------------
+# --------------------------
 
 def main():
-    app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
+    token = os.getenv("BOT_TOKEN")
+    app = ApplicationBuilder().token(token).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.LOCATION, salva_posizione))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    app.add_handler(MessageHandler(filters.Regex("^Entrata$"), handle_entrata))
-    app.add_handler(MessageHandler(filters.Regex("^Uscita$"), handle_uscita))
-
-    app.add_handler(MessageHandler(filters.Regex("^Inizio lavoro$"), handle_inizio))
-    app.add_handler(MessageHandler(filters.Regex("^Fine lavoro$"), handle_fine))
-
-    app.add_handler(MessageHandler(filters.Regex("^Lavori fissi$"), handle_lavori_fissi))
-    app.add_handler(MessageHandler(filters.Regex(".*"), registra_lavoro))
-
-    app.add_handler(MessageHandler(filters.Regex("^Esporta Excel$"), esporta_excel))
-    app.add_handler(MessageHandler(filters.Regex("^Reset mese$"), reset_mese))
+    jq = app.job_queue
+    jq.run_daily(reminder, time=dtime(21, 0))  # 22:00 italiane circa
 
     app.run_polling()
 
