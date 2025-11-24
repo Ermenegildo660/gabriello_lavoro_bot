@@ -1,5 +1,6 @@
 import json
 import os
+import math
 from datetime import datetime, time as dtime
 from telegram import Update, ReplyKeyboardMarkup, InputFile
 from telegram.ext import (
@@ -8,10 +9,30 @@ from telegram.ext import (
 )
 
 DATA_FILE = "dati.json"
-AUTHORIZED_USER_ID = 361555418  # tuo ID
+AUTHORIZED_USER_ID = 361555418  # il tuo ID
 
 # --------------------------
-# LETTURA / SALVATAGGIO DATI
+# COORDINATE DEL LAVORO
+# --------------------------
+
+# Coordinate fornite (Cassano Magnago)
+WORK_LAT = 45.6595
+WORK_LON = 8.8290
+WORK_RADIUS = 120   # metri di tolleranza
+
+# Calcolo distanza (formula Haversine)
+def distanza(lat1, lon1, lat2, lon2):
+    R = 6371000
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*(math.sin(dlambda/2)**2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+# --------------------------
+# LETTURA / SCRITTURA DATI
 # --------------------------
 
 def load_data():
@@ -23,6 +44,7 @@ def load_data():
 def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
 
 # --------------------------
 # TASTIERE
@@ -43,8 +65,9 @@ def menu_lavori():
         resize_keyboard=True
     )
 
+
 # --------------------------
-# LAVORI FISSI COMPLETI
+# LAVORI FISSI
 # --------------------------
 
 LAVORI_FISSI = [
@@ -84,9 +107,10 @@ LAVORI_FISSI = [
 ]
 
 def menu_lavori_fissi():
-    righe = [[lavoro] for lavoro in LAVORI_FISSI]
+    righe = [[l] for l in LAVORI_FISSI]
     righe.append(["Indietro"])
     return ReplyKeyboardMarkup(righe, resize_keyboard=True)
+
 
 # --------------------------
 # START
@@ -97,9 +121,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Accesso non autorizzato.")
     await update.message.reply_text("Bot lavoro attivo.", reply_markup=menu_principale())
 
-# --------------------------------------
-# 🟡 FUNZIONE: INIZIO LAVORO AUTOMATICO
-# --------------------------------------
+
+# --------------------------
+# INIZIO LAVORO AUTOMATICO
+# --------------------------
 
 async def auto_inizio_lavoro(context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
@@ -113,6 +138,7 @@ async def auto_inizio_lavoro(context: ContextTypes.DEFAULT_TYPE):
         chat_id=AUTHORIZED_USER_ID,
         text=f"⏱ Inizio lavoro automatico registrato.\n{now}"
     )
+
 
 # --------------------------
 # HANDLER PRINCIPALE
@@ -132,39 +158,56 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user not in data:
         data[user] = {"records": [], "work_start": None}
 
-    adding_extra = context.user_data.get("adding_extra_work", False)
+    # Leggo ultima posizione ricevuta
+    last_pos = context.user_data.get("last_position")
 
-    # INDIETRO
-    if text == "Indietro":
-        context.user_data["adding_extra_work"] = False
-        return await update.message.reply_text("Menu principale", reply_markup=menu_principale())
-
-    # ENTRATA
+    # Entrata con controllo posizione
     if text == "Entrata":
+        if not last_pos:
+            return await update.message.reply_text("⚠️ Nessuna posizione ricevuta. Invia la posizione in tempo reale.")
+
+        dist = distanza(last_pos["lat"], last_pos["lon"], WORK_LAT, WORK_LON)
+
+        if dist > WORK_RADIUS:
+            return await update.message.reply_text(f"❌ Sei fuori zona ({int(dist)} m). Entrata non registrata.")
+
+        # Registrazione entrata
         data[user]["records"].append({"azione": "Entrata", "orario": now_str})
         save_data(data)
 
-        # 🔥 AVVIO TIMER 10 MINUTI
+        # Avvio automatico inizio lavoro
         context.job_queue.run_once(auto_inizio_lavoro, when=600)
 
         return await update.message.reply_text(
-            f"Entrata registrata\n{now_str}\n\n"
-            "⏱ Tra 10 minuti partirà automaticamente l'inizio lavoro."
+            f"Entrata registrata ✔️\n{now_str}\n\n"
+            f"📍 Sei entro {int(dist)} metri dal posto.\n"
+            "⏱ Inizio lavoro partirà automaticamente tra 10 minuti."
         )
 
-    # USCITA
+    # Uscita con controllo posizione
     if text == "Uscita":
+        if not last_pos:
+            return await update.message.reply_text("⚠️ Nessuna posizione ricevuta. Invia la posizione in tempo reale.")
+
+        dist = distanza(last_pos["lat"], last_pos["lon"], WORK_LAT, WORK_LON)
+
+        if dist > WORK_RADIUS:
+            return await update.message.reply_text(f"❌ Sei fuori zona ({int(dist)} m). Uscita non registrata.")
+
         data[user]["records"].append({"azione": "Uscita", "orario": now_str})
         save_data(data)
-        return await update.message.reply_text(f"Uscita registrata\n{now_str}")
 
-    # INIZIO LAVORO MANUALE
+        return await update.message.reply_text(
+            f"Uscita registrata ✔️\n{now_str}\n📍 Sei entro {int(dist)} metri dal posto."
+        )
+
+    # Inizio lavoro manuale
     if text == "Inizio lavoro":
         data[user]["work_start"] = now_str
         save_data(data)
         return await update.message.reply_text(f"Inizio lavoro registrato\n{now_str}")
 
-    # FINE LAVORO
+    # Fine lavoro
     if text == "Fine lavoro":
         start = data[user]["work_start"]
         if not start:
@@ -185,13 +228,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return await update.message.reply_text(f"Fine lavoro\nOre lavorate: {ore}")
 
-    # LAVORI DEL GIORNO
+    # Lavori del giorno
     if text == "Lavori del giorno":
         context.user_data["adding_extra_work"] = True
         return await update.message.reply_text("Scrivi il lavoro:", reply_markup=menu_lavori())
 
-    # LAVORO EXTRA
-    if adding_extra:
+    # Lavoro extra
+    if context.user_data.get("adding_extra_work", False):
         data[user]["records"].append({
             "azione": "Lavoro extra",
             "lavoro": text,
@@ -201,7 +244,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["adding_extra_work"] = False
         return await update.message.reply_text("Lavoro registrato.", reply_markup=menu_principale())
 
-    # LAVORI FISSI
+    # Lavori fissi
     if text == "Lavori fissi":
         return await update.message.reply_text("Seleziona un lavoro:", reply_markup=menu_lavori_fissi())
 
@@ -214,39 +257,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data(data)
         return await update.message.reply_text("Lavoro registrato.", reply_markup=menu_principale())
 
-    # RESET
+    # Reset mese
     if text == "Reset mese":
         data[user] = {"records": [], "work_start": None}
         save_data(data)
         return await update.message.reply_text("Dati del mese resettati.")
 
-    # ESPORTA EXCEL
+    # Esporta excel
     if text == "Esporta Excel":
         await genera_excel(update)
         return
 
-    # BACKUP
+    # Backup
     if text == "Backup dati":
         return await update.message.reply_document(InputFile(DATA_FILE), caption="Backup")
 
-    # FALLBACK
     await update.message.reply_text("Comando non riconosciuto.", reply_markup=menu_principale())
 
+
 # --------------------------
-# GENERA EXCEL + INVIO
+# POSIZIONE IN TEMPO REALE
+# --------------------------
+
+async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lat = update.message.location.latitude
+    lon = update.message.location.longitude
+    context.user_data["last_position"] = {"lat": lat, "lon": lon}
+    print(f"Posizione aggiornata: {lat}, {lon}")
+
+
+# --------------------------
+# GENERA EXCEL
 # --------------------------
 
 async def genera_excel(update: Update):
     from openpyxl import Workbook
     from telegram import InputFile
 
-    print("=== ESPORTAZIONE AVVIATA ===")
-
     data = load_data()
     user = str(AUTHORIZED_USER_ID)
     records = data.get(user, {}).get("records", [])
-
-    print(f"Record trovati: {len(records)}")
 
     if not records:
         return await update.message.reply_text("Nessun dato da esportare.")
@@ -276,6 +326,7 @@ async def genera_excel(update: Update):
             caption="Esportazione completata"
         )
 
+
 # --------------------------
 # PROMEMORIA
 # --------------------------
@@ -286,6 +337,7 @@ async def reminder(context: ContextTypes.DEFAULT_TYPE):
         text="Promemoria: ricordati di esportare l'Excel oggi 📝"
     )
 
+
 # --------------------------
 # MAIN
 # --------------------------
@@ -295,13 +347,14 @@ def main():
     app = ApplicationBuilder().token(token).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Promemoria ore 21:00 UTC (~22:00 italiane)
     jq = app.job_queue
     jq.run_daily(reminder, time=dtime(21, 0))
 
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
