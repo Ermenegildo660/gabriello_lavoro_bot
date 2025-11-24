@@ -8,11 +8,11 @@ from telegram.ext import (
 )
 
 DATA_FILE = "dati.json"
-AUTHORIZED_USER_ID = 361555418  # tuo ID Telegram
+AUTHORIZED_USER_ID = 361555418  # tuo ID
 
-# ------------------------------------------------------------
-# FUNZIONI LETTURA / SCRITTURA JSON
-# ------------------------------------------------------------
+# --------------------------
+# LETTURA / SALVATAGGIO DATI
+# --------------------------
 
 def load_data():
     if not os.path.exists(DATA_FILE):
@@ -24,9 +24,9 @@ def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-# ------------------------------------------------------------
+# --------------------------
 # TASTIERE
-# ------------------------------------------------------------
+# --------------------------
 
 def menu_principale():
     return ReplyKeyboardMarkup([
@@ -43,9 +43,9 @@ def menu_lavori():
         resize_keyboard=True
     )
 
-# ------------------------------------------------------------
-# LISTA COMPLETA LAVORI FISSI
-# ------------------------------------------------------------
+# --------------------------
+# LAVORI FISSI COMPLETI
+# --------------------------
 
 LAVORI_FISSI = [
     "Lavaggio settimanale scalette pasticceria",
@@ -88,18 +88,35 @@ def menu_lavori_fissi():
     righe.append(["Indietro"])
     return ReplyKeyboardMarkup(righe, resize_keyboard=True)
 
-# ------------------------------------------------------------
+# --------------------------
 # START
-# ------------------------------------------------------------
+# --------------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != AUTHORIZED_USER_ID:
         return await update.message.reply_text("Accesso non autorizzato.")
     await update.message.reply_text("Bot lavoro attivo.", reply_markup=menu_principale())
 
-# ------------------------------------------------------------
+# --------------------------------------
+# 🟡 FUNZIONE: INIZIO LAVORO AUTOMATICO
+# --------------------------------------
+
+async def auto_inizio_lavoro(context: ContextTypes.DEFAULT_TYPE):
+    data = load_data()
+    user = str(AUTHORIZED_USER_ID)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    data[user]["work_start"] = now
+    save_data(data)
+
+    await context.bot.send_message(
+        chat_id=AUTHORIZED_USER_ID,
+        text=f"⏱ Inizio lavoro automatico registrato.\n{now}"
+    )
+
+# --------------------------
 # HANDLER PRINCIPALE
-# ------------------------------------------------------------
+# --------------------------
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != AUTHORIZED_USER_ID:
@@ -126,7 +143,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "Entrata":
         data[user]["records"].append({"azione": "Entrata", "orario": now_str})
         save_data(data)
-        return await update.message.reply_text(f"Entrata registrata\n{now_str}")
+
+        # 🔥 AVVIO TIMER 10 MINUTI
+        context.job_queue.run_once(auto_inizio_lavoro, when=600)
+
+        return await update.message.reply_text(
+            f"Entrata registrata\n{now_str}\n\n"
+            "⏱ Tra 10 minuti partirà automaticamente l'inizio lavoro."
+        )
 
     # USCITA
     if text == "Uscita":
@@ -134,7 +158,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data(data)
         return await update.message.reply_text(f"Uscita registrata\n{now_str}")
 
-    # INIZIO LAVORO
+    # INIZIO LAVORO MANUALE
     if text == "Inizio lavoro":
         data[user]["work_start"] = now_str
         save_data(data)
@@ -145,6 +169,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         start = data[user]["work_start"]
         if not start:
             return await update.message.reply_text("Prima premi 'Inizio lavoro'.")
+
         start_dt = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
         ore = round((now - start_dt).total_seconds() / 3600, 2)
 
@@ -157,6 +182,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         data[user]["work_start"] = None
         save_data(data)
+
         return await update.message.reply_text(f"Fine lavoro\nOre lavorate: {ore}")
 
     # LAVORI DEL GIORNO
@@ -164,7 +190,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["adding_extra_work"] = True
         return await update.message.reply_text("Scrivi il lavoro:", reply_markup=menu_lavori())
 
-    # SALVATAGGIO LAVORO EXTRA
+    # LAVORO EXTRA
     if adding_extra:
         data[user]["records"].append({
             "azione": "Lavoro extra",
@@ -188,7 +214,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data(data)
         return await update.message.reply_text("Lavoro registrato.", reply_markup=menu_principale())
 
-    # RESET MESE
+    # RESET
     if text == "Reset mese":
         data[user] = {"records": [], "work_start": None}
         save_data(data)
@@ -199,23 +225,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await genera_excel(update)
         return
 
-    # BACKUP JSON
+    # BACKUP
     if text == "Backup dati":
-        if not os.path.exists(DATA_FILE):
-            return await update.message.reply_text("Nessun dato presente.")
-        return await update.message.reply_document(InputFile(DATA_FILE), caption="Backup file dati.json")
+        return await update.message.reply_document(InputFile(DATA_FILE), caption="Backup")
 
     # FALLBACK
     await update.message.reply_text("Comando non riconosciuto.", reply_markup=menu_principale())
 
-# ------------------------------------------------------------
-# GENERA EXCEL IN /var/tmp (funziona SEMPRE su Railway)
-# ------------------------------------------------------------
+# --------------------------
+# GENERA EXCEL + INVIO
+# --------------------------
 
 async def genera_excel(update: Update):
     from openpyxl import Workbook
     from telegram import InputFile
-    import os
 
     print("=== ESPORTAZIONE AVVIATA ===")
 
@@ -226,7 +249,6 @@ async def genera_excel(update: Update):
     print(f"Record trovati: {len(records)}")
 
     if not records:
-        print("NESSUN DATO DA ESPORTARE")
         return await update.message.reply_text("Nessun dato da esportare.")
 
     wb = Workbook()
@@ -245,41 +267,28 @@ async def genera_excel(update: Update):
             r.get("lavoro", "")
         ])
 
-    print("Scrittura righe completata.")
-
     file_path = "/var/tmp/registro_lavoro.xlsx"
+    wb.save(file_path)
 
-    try:
-        wb.save(file_path)
-        print(f"FILE SALVATO IN: {file_path}")
-    except Exception as e:
-        print("ERRORE DURANTE IL SALVATAGGIO:", e)
-        return await update.message.reply_text(f"Errore durante l'esportazione: {e}")
+    with open(file_path, "rb") as f:
+        await update.message.reply_document(
+            document=InputFile(f, filename="registro_lavoro.xlsx"),
+            caption="Esportazione completata"
+        )
 
-    try:
-        with open(file_path, "rb") as f:
-            await update.message.reply_document(
-                document=InputFile(f, filename="registro_lavoro.xlsx"),
-                caption="Esportazione completata"
-            )
-        print("FILE INVIATO A TELEGRAM")
-    except Exception as e:
-        print("ERRORE INVIO TELEGRAM:", e)
-        await update.message.reply_text(f"Errore durante l'invio: {e}")
-
-# ------------------------------------------------------------
-# PROMEMORIA GIORNALIERO
-# ------------------------------------------------------------
+# --------------------------
+# PROMEMORIA
+# --------------------------
 
 async def reminder(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=AUTHORIZED_USER_ID,
-        text="Promemoria: ricordati di premere 'Esporta Excel' per salvare i dati di oggi."
+        text="Promemoria: ricordati di esportare l'Excel oggi 📝"
     )
 
-# ------------------------------------------------------------
+# --------------------------
 # MAIN
-# ------------------------------------------------------------
+# --------------------------
 
 def main():
     token = os.getenv("BOT_TOKEN")
@@ -288,8 +297,9 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    # Promemoria ore 21:00 UTC (~22:00 italiane)
     jq = app.job_queue
-    jq.run_daily(reminder, time=dtime(21, 0))  # 22:00 italiane
+    jq.run_daily(reminder, time=dtime(21, 0))
 
     app.run_polling()
 
