@@ -1,5 +1,6 @@
 import json
 import os
+import pytz
 from datetime import datetime, time as dtime
 from telegram import Update, ReplyKeyboardMarkup, InputFile
 from telegram.ext import (
@@ -11,8 +12,17 @@ DATA_FILE = "dati.json"
 AUTHORIZED_USER_ID = 361555418  # tuo ID
 
 # --------------------------
+# ORA ITALIANA
+# --------------------------
+
+def ora_italia():
+    tz = pytz.timezone("Europe/Rome")
+    return datetime.now(tz)
+
+# --------------------------
 # LAVORI FISSI
 # --------------------------
+
 LAVORI_FISSI = [
     "Lavaggio settimanale scalette pasticceria",
     "Lavaggio settimanale rampa panificio",
@@ -106,17 +116,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def auto_inizio_lavoro(context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
     user = str(AUTHORIZED_USER_ID)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = ora_italia().strftime("%Y-%m-%d %H:%M:%S")
 
     if user not in data:
         data[user] = {"records": [], "work_start": None}
 
-    data[user]["work_start"] = now
+    data[user]["work_start"] = now_str
     save_data(data)
 
     await context.bot.send_message(
         chat_id=AUTHORIZED_USER_ID,
-        text=f"Inizio lavoro automatico registrato.\n{now}"
+        text=f"Inizio lavoro automatico registrato.\n{now_str}"
     )
 
 # --------------------------
@@ -127,14 +137,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != AUTHORIZED_USER_ID:
         return
 
-    text = update.message.text
+    raw_text = update.message.text or ""
+    text = raw_text.strip()
+    lower = text.lower()
+
     data = load_data()
     user = str(AUTHORIZED_USER_ID)
 
     if user not in data:
         data[user] = {"records": [], "work_start": None}
 
-    now = datetime.now()
+    now = ora_italia()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
     adding_extra = context.user_data.get("adding_extra_work", False)
@@ -147,8 +160,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=menu_principale()
         )
 
-    # --- ENTRATA ---
-    if text == "Entrata":
+    # --- ENTRATA (tasto + link) ---
+    if lower == "entrata":
         data[user]["records"].append({"azione": "Entrata", "orario": now_str})
         save_data(data)
 
@@ -160,24 +173,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Tra 10 minuti partirà automaticamente l'inizio lavoro."
         )
 
-    # --- USCITA ---
-    if text == "Uscita":
+    # --- USCITA (tasto + link) ---
+    if lower == "uscita":
         data[user]["records"].append({"azione": "Uscita", "orario": now_str})
         save_data(data)
         return await update.message.reply_text(f"Uscita registrata\n{now_str}")
 
     # --- INIZIO LAVORO MANUALE ---
-    if text == "Inizio lavoro":
+    if lower == "inizio lavoro":
         data[user]["work_start"] = now_str
         save_data(data)
         return await update.message.reply_text(f"Inizio lavoro registrato\n{now_str}")
 
-    # --- FINE LAVORO ---
-    if text == "Fine lavoro":
+    # --- FINE LAVORO (con orario fine) ---
+    if lower == "fine lavoro":
         start_time_str = data[user]["work_start"]
         if not start_time_str:
             return await update.message.reply_text("Prima premi 'Inizio lavoro'.")
-        start_dt = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+
+        # start salvato come stringa in orario italiano → lo rilocalizziamo
+        tz = pytz.timezone("Europe/Rome")
+        start_naive = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+        start_dt = tz.localize(start_naive)
+
         diff = now - start_dt
         ore = round(diff.total_seconds() / 3600, 2)
 
@@ -189,7 +207,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
         data[user]["work_start"] = None
         save_data(data)
-        return await update.message.reply_text(f"Fine lavoro\nOre lavorate: {ore} h")
+
+        return await update.message.reply_text(
+            f"Fine lavoro registrato.\n"
+            f"Orario fine: {now_str}\n"
+            f"Ore lavorate: {ore} h"
+        )
 
     # --- LAVORI DEL GIORNO ---
     if text == "Lavori del giorno":
@@ -208,7 +231,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         data[user]["records"].append({
             "azione": "Lavoro extra",
-            "lavoro": text,
+            "lavoro": raw_text,
             "orario": now_str
         })
         save_data(data)
@@ -327,7 +350,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     jq = app.job_queue
-    jq.run_daily(reminder, time=dtime(21, 0))  # 22:00 italiane circa
+    jq.run_daily(reminder, time=dtime(21, 0))  # 22:00 italiane
 
     app.run_polling()
 
