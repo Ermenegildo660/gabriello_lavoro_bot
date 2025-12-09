@@ -9,19 +9,21 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 
-# --------------------------
-# CONFIG
-# --------------------------
+# --------------------------------------
+# CONFIGURAZIONE
+# --------------------------------------
 
 DATA_FILE = "dati.json"
 AUTHORIZED_USER_ID = 361555418  # tuo ID
+TZ = pytz.timezone("Europe/Rome")  # orario Italia
 
-# timezone Italia
-TZ = pytz.timezone("Europe/Rome")
+def now_it():
+    return datetime.now(TZ)
 
-# --------------------------
+
+# --------------------------------------
 # LAVORI FISSI
-# --------------------------
+# --------------------------------------
 
 LAVORI_FISSI = [
     "Lavaggio settimanale scalette pasticceria",
@@ -39,6 +41,7 @@ LAVORI_FISSI = [
     "Pulizia robot scarica carrelli zona cotto",
     "Pulizia mensile linea taglio pane acqua Beor",
     "Lavaggio lavastoviglie Velox",
+    "Pulizia mensile pesa linea ingredienti",
     "Pulizia mensile frontale forno platea 10",
     "Pulizia mensile frontale forno platea 11",
     "Pulizia sopra forni rotor/Polin zona cotto",
@@ -58,9 +61,10 @@ LAVORI_FISSI = [
     "Pulizia totale cella negativa pasticceria"
 ]
 
-# --------------------------
-# FUNZIONI BASE
-# --------------------------
+
+# --------------------------------------
+# LETTURA / SCRITTURA DATI
+# --------------------------------------
 
 def load_data():
     if not os.path.exists(DATA_FILE):
@@ -72,13 +76,10 @@ def save_data(data):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-def now_it():
-    """Orario corretto italiano anche su Railway"""
-    return datetime.now(TZ)
 
-# --------------------------
+# --------------------------------------
 # TASTIERE
-# --------------------------
+# --------------------------------------
 
 def menu_principale():
     return ReplyKeyboardMarkup([
@@ -100,30 +101,97 @@ def menu_lavori_fissi():
     righe.append(["Indietro"])
     return ReplyKeyboardMarkup(righe, resize_keyboard=True)
 
-# --------------------------
+
+# --------------------------------------
 # START
-# --------------------------
+# --------------------------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != AUTHORIZED_USER_ID:
         return await update.message.reply_text("Accesso non autorizzato.")
-    await update.message.reply_text("Bot lavoro attivo.", reply_markup=menu_principale())
+    await update.message.reply_text("Bot attivo 💼", reply_markup=menu_principale())
 
-# --------------------------
-# LINK AUTOMATICI
-# --------------------------
+
+# --------------------------------------
+# INIZIO LAVORO AUTOMATICO (10 minuti)
+# --------------------------------------
+
+async def auto_inizio_lavoro(context: ContextTypes.DEFAULT_TYPE):
+    data = load_data()
+    user = str(AUTHORIZED_USER_ID)
+
+    now = now_it()
+    now_date = now.strftime("%Y-%m-%d")
+    now_time = now.strftime("%H:%M:%S")
+
+    if user not in data:
+        data[user] = {"records": [], "work_start": None}
+
+    data[user]["work_start"] = f"{now_date} {now_time}"
+    save_data(data)
+
+    await context.bot.send_message(
+        chat_id=AUTHORIZED_USER_ID,
+        text=f"Inizio lavoro automatico registrato alle {now_time} ⏱"
+    )
+
+
+# --------------------------------------
+# COMANDI AUTOMATICI /entrata_auto /uscita_auto
+# --------------------------------------
 
 async def entrata_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    update.message.text = "Entrata"
-    return await handle_message(update, context)
+    """Identica a Entrata + parte timer 10 min"""
+    now = now_it()
+    now_date = now.strftime("%Y-%m-%d")
+    now_time = now.strftime("%H:%M:%S")
+
+    data = load_data()
+    user = str(AUTHORIZED_USER_ID)
+
+    if user not in data:
+        data[user] = {"records": [], "work_start": None}
+
+    data[user]["records"].append({
+        "data": now_date,
+        "azione": "Entrata",
+        "inizio": now_time,
+        "fine": "",
+        "ore": "",
+        "lavoro": ""
+    })
+    save_data(data)
+
+    # ⏱ parte inizio lavoro automatico tra 10 minuti
+    context.job_queue.run_once(auto_inizio_lavoro, when=600)
+
+    return await update.message.reply_text(f"Entrata registrata alle {now_time}")
 
 async def uscita_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    update.message.text = "Uscita"
-    return await handle_message(update, context)
+    """Identica a Uscita"""
+    now = now_it()
+    now_date = now.strftime("%Y-%m-%d")
+    now_time = now.strftime("%H:%M:%S")
 
-# --------------------------
+    data = load_data()
+    user = str(AUTHORIZED_USER_ID)
+
+    data[user]["records"].append({
+        "data": now_date,
+        "azione": "Uscita",
+        "inizio": "",
+        "fine": now_time,
+        "ore": "",
+        "lavoro": ""
+    })
+    save_data(data)
+
+    return await update.message.reply_text(f"Uscita registrata alle {now_time}")
+
+
+# --------------------------------------
 # HANDLER PRINCIPALE
-# --------------------------
+# --------------------------------------
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -144,13 +212,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     adding_extra = context.user_data.get("adding_extra_work", False)
 
     # --------------------------
-    # COMANDI BASE
+    # ENTRATA
     # --------------------------
-
-    if text == "Indietro":
-        context.user_data["adding_extra_work"] = False
-        return await update.message.reply_text("Menu principale", reply_markup=menu_principale())
-
     if text == "Entrata":
         data[user]["records"].append({
             "data": now_date,
@@ -161,8 +224,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "lavoro": ""
         })
         save_data(data)
-        return await update.message.reply_text(f"Entrata registrata alle {now_time}")
 
+        # timer 10 minuti
+        context.job_queue.run_once(auto_inizio_lavoro, when=600)
+
+        return await update.message.reply_text(
+            f"Entrata registrata alle {now_time} ⏱\n"
+            "Tra 10 minuti parte automaticamente Inizio Lavoro."
+        )
+
+    # --------------------------
+    # USCITA
+    # --------------------------
     if text == "Uscita":
         data[user]["records"].append({
             "data": now_date,
@@ -175,11 +248,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data(data)
         return await update.message.reply_text(f"Uscita registrata alle {now_time}")
 
+    # --------------------------
+    # INIZIO LAVORO
+    # --------------------------
     if text == "Inizio lavoro":
         data[user]["work_start"] = f"{now_date} {now_time}"
         save_data(data)
         return await update.message.reply_text(f"Inizio lavoro registrato alle {now_time}")
 
+    # --------------------------
+    # FINE LAVORO
+    # --------------------------
     if text == "Fine lavoro":
         start_str = data[user]["work_start"]
         if not start_str:
@@ -204,15 +283,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --------------------------
     # LAVORI DEL GIORNO
     # --------------------------
-
     if text == "Lavori del giorno":
         context.user_data["adding_extra_work"] = True
         return await update.message.reply_text("Scrivi il lavoro:", reply_markup=menu_lavori())
 
     if adding_extra:
-        if text == "Scrivi lavoro extra":
-            return await update.message.reply_text("Scrivi il testo del lavoro:", reply_markup=menu_lavori())
-
         data[user]["records"].append({
             "data": now_date,
             "azione": "Lavoro extra",
@@ -228,7 +303,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --------------------------
     # LAVORI FISSI
     # --------------------------
-
     if text == "Lavori fissi":
         return await update.message.reply_text("Seleziona un lavoro:", reply_markup=menu_lavori_fissi())
 
@@ -245,33 +319,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("Lavoro registrato.", reply_markup=menu_principale())
 
     # --------------------------
-    # RESET MESE
+    # RESET
     # --------------------------
-
     if text == "Reset mese":
-        data[user]["records"] = []
-        data[user]["work_start"] = None
+        data[user] = {"records": [], "work_start": None}
         save_data(data)
         return await update.message.reply_text("Dati del mese resettati.")
 
     # --------------------------
     # ESPORTA EXCEL
     # --------------------------
-
     if text == "Esporta Excel":
         await genera_excel(update)
         return
 
+    # --------------------------
     # BACKUP
+    # --------------------------
     if text == "Backup dati":
-        await update.message.reply_document(InputFile(DATA_FILE), caption="Backup completato")
-        return
+        return await update.message.reply_document(InputFile(DATA_FILE), caption="Backup completato ✔")
 
+    # fallback
     await update.message.reply_text("Comando non valido.", reply_markup=menu_principale())
 
-# --------------------------
+
+# --------------------------------------
 # GENERAZIONE EXCEL ORDINATO
-# --------------------------
+# --------------------------------------
 
 async def genera_excel(update: Update):
     from openpyxl import Workbook
@@ -303,24 +377,29 @@ async def genera_excel(update: Update):
 
     with open(file_path, "rb") as f:
         await update.message.reply_document(
-            document=InputFile(f, filename="registro_lavoro.xlsx"),
-            caption="Esportazione completata"
+            InputFile(f, filename="registro_lavoro.xlsx"),
+            caption="Esportazione completata ✔"
         )
 
-# --------------------------
+
+# --------------------------------------
 # MAIN
-# --------------------------
+# --------------------------------------
 
 def main():
     token = os.getenv("BOT_TOKEN")
     app = ApplicationBuilder().token(token).build()
 
-    app.add_handler(CommandHandler("start", start))
+    # comandi link
     app.add_handler(CommandHandler("entrata_auto", entrata_auto))
     app.add_handler(CommandHandler("uscita_auto", uscita_auto))
+
+    # comandi normali
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
