@@ -264,7 +264,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not start_str:
             return await update.message.reply_text("Prima premi 'Inizio lavoro'.")
 
-        start_dt = datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
+        naive_dt = datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
+        start_dt = TZ.localize(naive_dt)
         diff = now - start_dt
         ore = round(diff.total_seconds() / 3600, 2)
 
