@@ -1,4 +1,4 @@
-import json
+mport json
 import os
 from datetime import datetime
 import pytz
@@ -20,46 +20,6 @@ TZ = pytz.timezone("Europe/Rome")  # orario Italia
 def now_it():
     return datetime.now(TZ)
 
-
-# --------------------------------------
-# LAVORI FISSI
-# --------------------------------------
-
-LAVORI_FISSI = [
-    "Lavaggio settimanale scalette pasticceria",
-    "Lavaggio settimanale rampa panificio",
-    "Pulizia settimanale forni rotor Polin/Bongard precotto/cotto/pizzeria",
-    "Soffiatura bruciatori platea/Werner",
-    "Pulizia tappeto semi automatico pane forni platea",
-    "Pulizia linee taglio pane e imbustaggio",
-    "Pulizia settimanale linea tappetti panetteria",
-    "Pulizia filtri sala farina silos",
-    "Lavaggio corridoio e aspirapolvere dietro forni",
-    "Pulizia volumetrica spezzatrice pizza",
-    "Pulizia volumetrica spezzatrice pagnotte",
-    "Controllo numeri pozzetti acqua/vvf",
-    "Pulizia robot scarica carrelli zona cotto",
-    "Pulizia mensile linea taglio pane acqua Beor",
-    "Lavaggio lavastoviglie Velox",
-    "Pulizia mensile pesa linea ingredienti",
-    "Pulizia mensile frontale forno platea 10",
-    "Pulizia mensile frontale forno platea 11",
-    "Pulizia sopra forni rotor/Polin zona cotto",
-    "Pulizia mensile 4 frontali forni rotor",
-    "Pulizia sopra forni rotor/Polin zona precotto",
-    "Pulizia lavastoviglie tunnel resi",
-    "Pulizia mensile forni rotor precotto",
-    "Pulizia teglie farina su carrello",
-    "Manutenzione addolcitori (sale/cillit)",
-    "Lavaggio carrelli e teglie legno",
-    "Pulizia mensile frontali rotor 1/2/3",
-    "Pulizia rotor Polin cotto (1 pezzo)",
-    "Pulizia rotor Polin cotto (2 pezzi)",
-    "Pulizia rotor Polin farcitura pizze (2 pezzi)",
-    "Pulizia linea impacchettamento pizza",
-    "Lavaggio bandelle cella negativa pasticceria",
-    "Pulizia totale cella negativa pasticceria"
-]
 
 
 # --------------------------------------
@@ -85,8 +45,7 @@ def menu_principale():
     return ReplyKeyboardMarkup([
         ["Entrata", "Uscita"],
         ["Inizio lavoro", "Fine lavoro"],
-        ["Lavori del giorno", "Lavori fissi"],
-        ["Esporta Excel", "Backup dati"],
+        ["Lavori del giorno", "Esporta Excel"],
         ["Reset mese"]
     ], resize_keyboard=True)
 
@@ -96,10 +55,6 @@ def menu_lavori():
         resize_keyboard=True
     )
 
-def menu_lavori_fissi():
-    righe = [[l] for l in LAVORI_FISSI]
-    righe.append(["Indietro"])
-    return ReplyKeyboardMarkup(righe, resize_keyboard=True)
 
 
 # --------------------------------------
@@ -301,23 +256,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["adding_extra_work"] = False
         return await update.message.reply_text("Lavoro registrato.", reply_markup=menu_principale())
 
-    # --------------------------
-    # LAVORI FISSI
-    # --------------------------
-    if text == "Lavori fissi":
-        return await update.message.reply_text("Seleziona un lavoro:", reply_markup=menu_lavori_fissi())
-
-    if text in LAVORI_FISSI:
-        data[user]["records"].append({
-            "data": now_date,
-            "azione": "Lavoro fisso",
-            "inizio": now_time,
-            "fine": "",
-            "ore": "",
-            "lavoro": text
-        })
-        save_data(data)
-        return await update.message.reply_text("Lavoro registrato.", reply_markup=menu_principale())
 
     # --------------------------
     # RESET
@@ -334,11 +272,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await genera_excel(update)
         return
 
-    # --------------------------
-    # BACKUP
-    # --------------------------
-    if text == "Backup dati":
-        return await update.message.reply_document(InputFile(DATA_FILE), caption="Backup completato ✔")
 
     # fallback
     await update.message.reply_text("Comando non valido.", reply_markup=menu_principale())
